@@ -1,0 +1,1603 @@
+@* Simplify \number\month/\number\day/\number\year.
+
+This program reads in a SAT problem in DIMACS cnf format, and outputs an
+equivalent SAT problem that is simplier.
+
+@ Description. This is a string that should provide a one-line description of
+the features in the program.
+
+@<Description.@>=
+'Simplify.'
+
+@ Problem size constants.
+
+@d max_variables=15000
+@d max_clauses==63000
+@d max_length=4 {Must be at least |size|.}
+
+@ Main program.
+
+@d Clauses_not_same==3
+@d Clauses_same==4
+@d Equal_literals_a==5
+@d Not_subsumed_a==6
+@d Subsumed_a==7
+@d Equal_literals_b==8
+@d Not_subsumed_b==9
+@d Subsumed_b==10
+@d Resolution_not_same==11
+@d Resolution_equal_a==12
+@d Not_resolved_a==13
+@d Resolved_a==14
+@d Resolution_equal_b==15
+@d Not_resolved_b==16
+@d Resolved_b==17
+@d Equal_exit==18
+@d Not_tracking==20
+@d Variable_used==21
+@d Variable_not_used==22
+@d Problem_exit==9998
+@d Grand_exit==9999
+
+@p
+program sim(input,output,data_out);
+label Clauses_not_same, Clauses_same, Equal_exit,
+  Equal_literals_a, Equal_literals_b,
+  Grand_exit, Not_resolved_a, Not_resolved_b, Not_subsumed_a, Not_subsumed_b,
+  {|Not_tracking,|}
+  Problem_exit, Resolution_equal_a, Resolution_equal_b, Resolution_not_same,
+  Resolved_a, Resolved_b, Subsumed_a, Subsumed_b{|,
+  Variable_not_used, Variable_used|};
+type @<Types.@>@;
+var @<Variables.@>@;
+@<Functions.@>@;
+begin
+rewrite(data_out,'dataout');
+{|writeln(@<Description.@>);|}
+@<One time initialization.@>@;
+@<Get formula.@>@;
+{|writeln('c ', last_clause_number:1,', clauses read in.');|}
+{|writeln('n_times=',n_times:1);|}
+{|writeln('Original predicate.'); Print_predicate;|}
+@<Renaming initialization.@>@;
+@<Simplify formula.@>@;
+{|writeln('Simlified predicate:'); Print_predicate;|}
+{|@<SAT.@>@;|}
+{|writeln('Simlified predicate before renaming:'); Print_predicate;|}
+{|@<Renaming variables.@>@;|}
+Print_DIMACS;
+Problem_exit:
+Grand_exit:
+end.
+
+@ Functions. This section makes sure that functions and procedures that need
+to be declared in a particular order are declared in that order.
+
+@<Functions.@>=
+@<Procedure Print literal list.@>@;
+@<Procedure Print DIMACS list.@>@;
+@<Procedure Print predicate.@>@;
+@<Procedure Print DIMACS.@>@;
+@<Procedure Remove literal.@>@;
+
+@ Variables.
+
+\item{}|data_out|: The file for output. The normal output also goes to the
+screen (often along with additional debugging output).
+
+@<Variables.@>=
+data_out: text;
+
+@* Predicate data structure.
+
+@ Variables.
+
+A predicate is a list of clauses. The variable |predicate_head| points to the
+head cell for this list. The list is circular with forward and backward links.
+
+@<Variables.@>=
+predicate_head: clause_pointer;
+
+@ One time initialization.
+
+@<One time initialization.@>=
+@<Make predicate head.@>@;
+
+@ Make predicate head.
+
+@<Make predicate head.@>=
+new(predicate_head);
+predicate_head^.literals:=nil;
+predicate_head^.clause_number:=0;
+@<Initialize predicate head to point to itself.@>@;
+
+@ Initialize predicate head to point to itself.
+
+@<Initialize predicate head to point to itself.@>=
+predicate_head^.next_clause:=predicate_head;
+predicate_head^.previous_clause:=predicate_head;
+
+@ Types. A clause is a list of literals. It is represented by a cell of type
+|clause_cell|. The pointer |literals| points to the list of literals that
+make up the clause. The |next_clause| and |previous_clause| fields link the
+various clauses together in a circular list. The |clause_number| field gives
+a simple reference to the clause that is useful when debugging the code.
+
+The |sat| field says whether or not the clause is needs to be considered when
+processing the current partial assignment. The clause does not need to be
+considered when it is satisfied or when its satisfaction will be ensured by
+the satisfaction of some other clause in the predicate. (Initially the
+partial assignment is empty, and no clause is satisfied.) The |sat_list|
+field is used to link together those clauses that had their |sat| fields set
+to |true| during the processing of a particular partial assignment (so that
+the |sat| field can be reset to false once the partial assignment is no
+longer under consideration.
+
+\item{}|next_clause|: Pointer to the next clause of the predicate.
+
+\item{}|previous_clause|: Pointer to the previous clause of the predicate.
+
+\item{}|literals|: Pointer to the list of literals for the clause.
+
+\item{}|clause_number|: The number of the clause. This is used to keep track
+of the clause for debugging.
+
+\item{}|clause_length|: Number of literals in the clause.
+
+\item{}|effective_length|: Number of literals in the clause that are not
+false. Satisfied clauses retain their old value for this until they become
+unknown again.
+
+\item{}|sat|: The value |true| indicates that the clause does not need to be
+considered while processing the current partial assignment.
+
+\item{}|sat_list|:
+
+@<Types.@>=
+variable_type=0..max_variables;
+clause_type=0..max_clauses;
+clause_pointer=^clause_cell;
+literal_pointer=^literal_cell;
+@/
+clause_cell=record
+  next_clause: clause_pointer;
+  previous_clause: clause_pointer;
+  literals: literal_pointer;
+  clause_number: 0..max_int;
+  clause_length: variable_type; {Number of literals in the clause.}
+  sat: Boolean; {|true| if clause is satisfied by current partial assignment.}
+  end;
+
+@ Types.
+
+The literals of a clause are represented by cells of type |literal_cell|.
+The |variable| field gives the name of the variable and the |positive| field
+says whether the variable is negated (|positive| field has |false|) or not.
+The |head| field points back to the |clause_cell| for the clause that
+contains the literal. The |next_occurrence| and |previous_occurrence| fields
+are used make a doubly linked list of all the occurrences of a particular
+literal. The |eta| field is used to indicate the extent to which the clause
+is depending of the literal to assume the value that will satisfy the clause.
+
+\item{}|next_literal|: Pointer to the next literal of the clause.
+\item{}|variable|: The name (an integer) of the variable for the current
+  literal.
+\item{}|positive|: The polarity (positive represented by |true|, negative by
+  |false|) of the current literal.
+\item{}|head|: Pointer to the |clause_cell| for the clause that the current
+  literal is contained in.
+\item{}|next_occurrence|: Pointer to next occurrence of the current literal in
+  some other clause. (This is a circular list with a head cell.)
+\item{}|previous_occurrence|: Pointer to the previous occurrence of the
+  current literal in some other clause.
+\item{}|eta|: Strength of signal (a probability) that the current clause send
+  to the associated literal.
+
+@<Types.@>=
+literal_cell=record
+  next_literal: literal_pointer; {Next literal of the clause.}
+  variable: variable_type; {Variable for this clause.}
+  positive: Boolean; {True if the literal is positive.}
+  head: clause_pointer; {Pointer to the clause that the literal is in.}
+  next_occurrence: literal_pointer; {Pointer to the literal cell with the same
+    literal of the next clause which uses the same literal.}
+  previous_occurrence: literal_pointer; {Pointer to the literal cell with the
+    same literal of the previous clause which uses the same literal.}
+  eta: real;
+  end;
+
+@ Literal table.
+
+The array |literal_table| is used to maintain lists for all the clauses that
+contain a particular literal. For each literal, there is a circular list with
+a head cell. The |literal_head| field of a |literal_table| entry points to
+the head of the list for the associated literal.
+
+@ Types.
+
+@<Types.@>=
+literal_table_cell=record
+  literal_head: literal_pointer; {Pointer to the head of the list for the
+    literal.}
+  count: array[1..max_length] of 0..max_clauses;
+  end;
+
+@ Variables.
+
+The |literal_head| field of |literal_table[v,p]| points to the head cell for
+the list of occurrences for the literal for variable |v| with polarity |p|.
+
+@<Variables.@>=
+literal_table: array [variable_type,false..true] of literal_table_cell;
+v: variable_type; {Name of a variable.}
+p: Boolean; {Polarity of a literal.}
+
+@ One time initialization.
+
+@<One time initialization.@>=
+@<Make literal heads.@>@;
+
+@ Make literal heads.
+
+For each literal with variable |v| and polarity |p|, |literal_table[v,p]|
+points to a circular list of uses of the literal. This code makes and initial
+empty circular list for each literal.
+
+@<Make literal heads.@>=
+for v:=1 to max_variables do
+  for p:=false to true do
+    begin
+    new(literal_table[v,p].literal_head);
+    @<Initialize variable table head to point to itself.@>@;
+    end;
+
+@ Initialize variable table head to point to itself.
+
+@<Initialize variable table head to point to itself.@>=
+literal_table[v,p].literal_head^.next_occurrence:=
+  literal_table[v,p].literal_head;
+literal_table[v,p].literal_head^.previous_occurrence:=
+  literal_table[v,p].literal_head;
+
+@* Get input.
+
+@ Variables.
+
+@<Variables.@>=
+variables: variable_type; {Number of variables for the current problem.}
+last_clause_number: 0..max_int; {Number of the last clause (so far).}
+new_clause: clause_pointer; {Pointer to a new clause.}
+clauses: clause_type; {Number of clauses.}
+
+@ Get formula.
+
+Initially, the predicate has no clauses.
+
+@<Get formula.@>=
+last_clause_number:=0;
+@<Read header.@>@;
+@<Read clauses.@>@;
+clauses:=clause_count;
+@<Link clauses with their literals sorted.@>@;
+
+@* Read input.
+
+@ Variables. Variables for obtaining formulas.
+
+@<Variables.@>=
+c: char; {A character.}
+clause_count: integer; {Number of clauses.}
+lit: -max_variables..max_variables; {A literal.}
+Used: array [variable_type] of Boolean; {|Used[i]| is |true| if variable
+  |i| occurs in the current clause.}
+Used_sign: array [variable_type] of Boolean; {|Used_sign[i]| is |true| if
+  variable |i| occurs positively in the current clause.}
+current_literal: literal_pointer; {Pointer to the current literal.}
+
+@ One time initialization.
+
+Mark all variables as not used in the current clause. The |Used[i]| array
+will be set and reset while processing various clauses.
+
+@<One time initialization.@>=
+for v:=1 to max_variables do
+  begin
+  Used[v]:=false;
+  {|writeln('Used[',v:1,'] is false.');|}
+  end;
+
+@ Read header.
+
+@<Read header.@>=
+read(c);
+@<Quit if |eof|.@>@;
+while c='c' do
+  begin
+  readln;
+  @<Quit if |eof|.@>@;
+  read(c);
+  @<Quit if |eof|.@>@;
+  end;
+if c<>'p' then
+  begin
+  writeln('No initial p');
+  goto Problem_exit;
+  end;
+while c<>' ' do
+  begin
+  read(c);
+  @<Quit if |eof|.@>@;
+  end;
+read(c);
+@<Quit if |eof|.@>@;
+if c<>'c' then
+  begin
+  writeln('No c');
+  goto Problem_exit;
+  end;
+read(c);
+@<Quit if |eof|.@>@;
+if c<>'n' then
+  begin
+  writeln('No n');
+  goto Problem_exit;
+  end;
+read(c);
+@<Quit if |eof|.@>@;
+if c<>'f' then
+  begin
+  writeln('No f');
+  goto Problem_exit;
+  end;
+readln(variables, clause_count);
+{|writeln('Problem has ',variables:1,' variables, ',clause_count:1,
+  ' clauses.');|}
+
+@ Read clauses.
+
+@<Read clauses.@>=
+while not eof do
+  begin
+  @<Read a clause.@>@;
+  {|writeln('Clause read.');|}
+  end;
+
+@ Read a clause.
+
+@<Read a clause.@>=
+read(lit);
+if lit>max_variables then
+  begin
+  writeln('Increase max_variables to ',variables:1,' and run again');
+  end;
+@<Make cell for clause.@>@;
+while lit<>0 do
+  begin
+  {|write(' ',lit:1);|}
+  @<Check literal and add to clause.@>@;
+  @<Quit if |eof|.@>@;
+  read(lit);
+  end;
+{|writeln;|}
+@<Clean up after reading a clause.@>@;
+if eoln then readln;
+
+@ Quit if |eof|.
+
+@<Quit if |eof|.@>=
+if eof then
+  begin
+  writeln('Early end of input');
+  goto Grand_exit;
+  end;
+
+@ Make cell for clause. Set up a cell for the new clause. Initially, it has
+no literals, it is not satisfied, and it has no length. It has the next
+clause number. It is linked onto the list of clauses.
+
+@<Make cell for clause.@>=
+new(new_clause);
+new_clause^.literals:=nil;
+new_clause^.clause_length:=0;
+new_clause^.sat:=false;
+last_clause_number:=last_clause_number+1;
+new_clause^.clause_number:=last_clause_number;
+new_clause^.previous_clause:=predicate_head^.previous_clause;
+new_clause^.next_clause:=predicate_head;
+predicate_head^.previous_clause^.next_clause:=new_clause;
+predicate_head^.previous_clause:=new_clause;
+
+@ Check literal and add to clause.
+
+@<Check literal and add to clause.@>=
+if lit<>0 then
+  begin
+  v:=abs(lit);
+  p:=(lit>0);
+  if Used[v] then
+    begin
+    if (p and Used_sign[v]) or (not p and not Used_sign[v]) then
+      @<Duplicate literal.@>
+    else
+      @<Tautology.@>@;
+    end
+  else
+    begin
+    if v<=max_variables then
+      @<Add literal to clause.@>
+    else
+      @<Variable too big.@>@;
+    end;
+  end;
+
+@ Duplicate literal. Duplicated literals are omitted from the clause.
+
+@<Duplicate literal.@>=
+begin
+{|writeln('Duplciated literal found, lit=',lit:1);|}
+end
+
+@ Tautology. If a tautological literal is found, the clause is marked as
+satisfied (so that it will be deleted), but the tautological literal is
+omitted from the (temporary) clause.
+
+@<Tautology.@>=
+begin
+{|writeln('Tautolgy found, lit=',lit:1);|}
+new_clause^.sat:=true;
+end;
+
+@ Add literal to clause.
+
+@<Add literal to clause.@>=
+begin
+Used[v]:=true;
+{|writeln('Used[',v:1,'] is true.');|}
+Used_sign[v]:=p;
+new(current_literal);
+current_literal^.variable:=v;
+current_literal^.positive:=p;
+current_literal^.head:=new_clause;
+@<Link literal by usage.@>@;
+@<Link literal onto clause.@>@;
+new_clause^.clause_length:=new_clause^.clause_length+1;
+end
+
+@ Link literal by usage.
+
+@<Link literal by usage.@>=
+current_literal^.next_occurrence:=
+  literal_table[current_literal^.variable,current_literal^.positive].
+  literal_head;
+current_literal^.previous_occurrence:=
+  literal_table[current_literal^.variable,current_literal^.positive].
+  literal_head^.previous_occurrence;
+literal_table[current_literal^.variable,current_literal^.positive].
+  literal_head^.previous_occurrence^.next_occurrence:=current_literal;
+literal_table[current_literal^.variable,current_literal^.positive].
+  literal_head^.previous_occurrence:=current_literal;
+
+@ Link literal onto clause. The literals of the clause are linked together
+for now to ease erasing the |Used| array. These links will complete redone
+later when we sort the literals of a clause in the order of the variable
+names.
+
+@<Link literal onto clause.@>=
+current_literal^.next_literal:=new_clause^.literals;
+new_clause^.literals:=current_literal;
+
+@ Variable too big.
+
+@<Variable too big.@>=
+begin
+writeln('Variable too big! ',v:1);
+goto Grand_exit;
+end;
+
+@ Clean up after reading a clause. Reset |Used| to indicate that all
+variables are not in use.
+
+@<Clean up after reading a clause.@>=
+current_literal:=new_clause^.literals;
+while current_literal<>nil do
+  begin
+  Used[current_literal^.variable]:=false;
+  {|writeln('Used[',current_literal^.variable:1,'] is false.');|}
+  current_literal:=current_literal^.next_literal;
+  end;
+
+@ Link clauses with their literals sorted.
+
+@<Link clauses with their literals sorted.@>=
+{|writeln('Start to sort literals.');|}
+@<Put in |nil| to mark end of list.@>@;
+{|writeln('nils in.');|}
+for v:=variables downto 1 do
+  for p:=false to true do
+    begin
+    {|writeln(v,p);|}
+    current_literal:=literal_table[v,p].literal_head^.next_occurrence;
+    {|writeln(current_literal,literal_table[v,p].literal_head);|}
+    while current_literal<>literal_table[v,p].literal_head do
+      begin
+      current_literal^.next_literal:=current_literal^.head^.literals;
+      current_literal^.head^.literals:=current_literal;
+      current_literal:=current_literal^.next_occurrence;
+      {|writeln(current_literal);|}
+      end;
+    end;
+{|writeln('Literals sorted.');|}
+
+@ Put in |nil| to mark end of list. We are getting to readd the literals to
+their clauses, this time in sorted by the variable name of the
+literal. Initially, we need to have each clause's list of literals to be
+empty. (The |head| fields of the literals still contain the information about
+which clause a literal belongs to, so we will have no trouble rebuilding the
+list of literals for the clause.)
+
+@<Put in |nil| to mark end of list.@>=
+new_clause:=predicate_head^.next_clause;
+while new_clause<>predicate_head do
+  begin
+  new_clause^.literals:=nil;
+  new_clause:=new_clause^.next_clause;
+  end;
+
+@* Simplify formula.
+
+@ Variables.
+
+@<Variables.@>=
+first_clause_literal: literal_pointer;
+second_clause_literal: literal_pointer;
+old_literal: literal_pointer;
+a_literal: literal_pointer;
+b_literal: literal_pointer;
+temp_literal: literal_pointer;
+old_clause: clause_pointer;
+simplification: Boolean;
+
+@ Simplify formula.
+
+Do various non-backtracking steps to simplify the formula.
+
+@<Simplify formula.@>=
+simplification:=true;
+while simplification do
+  begin
+  @<Remove true clauses.@>@;
+  @<Remove subsumed clauses.@>@;
+  simplification:=false;
+  {|Print_predicate;|}
+  @<Do resolutions where at least one parent is subsumed.@>@;
+  {|Print_predicate;|}
+  @<Process literals that are equal.@>@;
+  {|Print_predicate;|}
+  {|@<Add unit clauses for pure literals.@>@;|}
+  {|Print_predicate;|}
+  end;
+
+@ Remove true clauses.
+
+@<Remove true clauses.@>=
+current_clause:=predicate_head^.next_clause;
+while current_clause<>predicate_head do
+  begin
+  if current_clause^.sat then Remove_clause(current_clause);
+  current_clause:=current_clause^.next_clause;
+  end;
+
+@ Remove subsumed clauses.
+
+@<Remove subsumed clauses.@>=
+{|writeln('Remove subsumed clauses.');|}
+for v:=1 to variables do
+  begin
+  {|writeln('variable=',v:1);|}
+  for p:=false to true do
+    begin
+    {|writeln('parity=',p);|}
+    first_clause_literal:=literal_table[v,p].literal_head^.next_occurrence;
+    while first_clause_literal<>literal_table[v,p].literal_head do
+      begin
+      {|writeln('First clause=',first_clause_literal^.head^.clause_number:1);|}
+      second_clause_literal:=first_clause_literal^.next_occurrence;
+      while second_clause_literal<>literal_table[v,p].literal_head do
+        begin
+        {|writeln('Second clause=',
+          second_clause_literal^.head^.clause_number:1);|}
+        if first_clause_literal^.head^.clause_length<=
+          second_clause_literal^.head^.clause_length then
+          @<First clause shorter or equal subsumption.@>
+        else
+          @<Second clause shorter subsumption.@>@;
+        {|writeln(second_clause_literal);|}
+        end;
+      first_clause_literal:=first_clause_literal^.next_occurrence;
+      Subsumed_b:
+      end;
+    end;
+  end;
+
+@ First clause shorter or equal subsumption. Since the first clause is
+shorter or equal, all of its literals must be in the second clause (to have
+subsumption). If |first_clause_literal| is not the first literal of its
+clause, skip the clause because we will check the clause when processing the
+first literal of the clause.
+
+@<First clause shorter or equal subsumption.@>=
+begin
+{|writeln('First clause shorter or equal.');|}
+if first_clause_literal^.head^.literals=first_clause_literal then
+  begin
+  if first_clause_literal^.head^.clause_length=
+    second_clause_literal^.head^.clause_length then
+    @<Equal length subsumption.@>
+  else
+    begin
+    @<First clause shorter subsumption.@>@;
+    end;
+  end
+else
+  second_clause_literal:=second_clause_literal^.next_occurrence;
+end
+
+@ Equal length subsumption. The two clauses have the same length. The first
+clause subsumes the second if they have the same literals, and in this case
+the second clause is removed.
+
+@<Equal length subsumption.@>=
+begin
+{|writeln('Clauses have same length.');|}
+if second_clause_literal^.head^.literals=second_clause_literal then
+  begin
+  {|writeln('Clauses start with same literal.');|}
+  @<Check for having same literals.@>
+  end
+else
+  {Clause start with different literals, so they are not the same.}
+  second_clause_literal:=second_clause_literal^.next_occurrence;
+end
+
+@ Check for having same literals. The two clauses start with the same
+literal. Check to see whether their remaining literals are the same.
+
+@<Check for having same literals.@>=
+a_literal:=first_clause_literal^.next_literal;
+b_literal:=second_clause_literal^.next_literal;
+while a_literal<>nil do
+  begin
+  if a_literal^.variable<>b_literal^.variable then
+    goto Clauses_not_same;
+  if a_literal^.positive<>b_literal^.positive then
+    goto Clauses_not_same;
+  a_literal:=a_literal^.next_literal;
+  b_literal:=b_literal^.next_literal;
+  end;
+{|writeln('Repeated clauses:');|}
+{|write(first_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(first_clause_literal);|}
+{|write(second_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(second_clause_literal);|}
+old_clause:=second_clause_literal^.head;
+second_clause_literal:=second_clause_literal^.next_occurrence;
+Remove_clause(old_clause);
+goto Clauses_same;
+Clauses_not_same:
+second_clause_literal:=second_clause_literal^.next_occurrence;
+Clauses_same:
+
+@ First clause shorter subsumption. The second clause has a literal equal to
+the first literal of the first clause. See whether the remaining literals of
+the second clause occur in the first clause. If so, remove the second clause.
+
+@<First clause shorter subsumption.@>=
+a_literal:=first_clause_literal^.next_literal;
+b_literal:=second_clause_literal^.next_literal;
+while a_literal<>nil do
+  begin
+  while b_literal<>nil do
+    begin
+    if b_literal^.variable>=a_literal^.variable then
+      begin
+      if b_literal^.variable>a_literal^.variable then goto Not_subsumed_a;
+      if a_literal^.positive<>b_literal^.positive then
+        goto Not_subsumed_a;
+      goto Equal_literals_a;
+      end;
+    b_literal:=b_literal^.next_literal;
+    end;
+  goto Not_subsumed_a;
+  Equal_literals_a:
+  a_literal:=a_literal^.next_literal;
+  b_literal:=b_literal^.next_literal;
+  end;
+{|writeln('First clause subsumes second:');|}
+{|write(first_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(first_clause_literal);|}
+{|write(second_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(second_clause_literal^.head^.literals);|}
+old_clause:=second_clause_literal^.head;
+second_clause_literal:=second_clause_literal^.next_occurrence;
+Remove_clause(old_clause);
+goto Subsumed_a;
+Not_subsumed_a:
+  second_clause_literal:=second_clause_literal^.next_occurrence;
+Subsumed_a:
+
+@ Second clause shorter subsumption. If |second_clause_literal| is not the
+first literal of its clause, skip the clause because we will check the clause
+when processing the first literal of the clause.
+
+@<Second clause shorter subsumption.@>=
+begin
+if second_clause_literal^.head^.literals=second_clause_literal then
+  begin
+  a_literal:=second_clause_literal^.next_literal;
+  b_literal:=first_clause_literal^.next_literal;
+  while a_literal<>nil do
+    begin
+    {|writeln('a_literal=',a_literal);|}
+    {|writeln('1 b_literal=',b_literal);|}
+    while b_literal<>nil do
+      begin
+      {|writeln('2 b_literal=',b_literal);|}
+      if b_literal^.variable>=a_literal^.variable then
+        begin
+        if b_literal^.variable>a_literal^.variable then goto Not_subsumed_b;
+        if a_literal^.positive<>b_literal^.positive then
+          goto Not_subsumed_b;
+        goto Equal_literals_b;
+        end;
+      b_literal:=b_literal^.next_literal;
+      end;
+    goto Not_subsumed_b;
+    Equal_literals_b:
+    a_literal:=a_literal^.next_literal;
+    b_literal:=b_literal^.next_literal;
+    end;
+  {|writeln('Second clause subsumes first:');|}
+  {|write(first_clause_literal^.head^.clause_number:1,':');|}
+  {|Print_literal_list(first_clause_literal^.head^.literals);|}
+  {|write(second_clause_literal^.head^.clause_number:1,':');|}
+  {|Print_literal_list(second_clause_literal);|}
+  old_clause:=first_clause_literal^.head;
+  first_clause_literal:=first_clause_literal^.next_occurrence;
+  Remove_clause(old_clause);
+  goto Subsumed_b;
+  Not_subsumed_b:
+  second_clause_literal:=second_clause_literal^.next_occurrence;
+  end
+else
+  second_clause_literal:=second_clause_literal^.next_occurrence;
+end;
+
+@ Procedure Remove clause. Remove |current_clause| from the predicate.
+
+@<Functions.@>=
+procedure Remove_clause(current_clause: clause_pointer);
+var
+  old_clause: clause_pointer;
+  old_literal: literal_pointer;
+  current_literal: literal_pointer;
+begin
+{|writeln('Remove clause ',current_clause^.clause_number:1);|}
+current_literal:=current_clause^.literals;
+while current_literal<>nil do
+  begin
+  {|writeln('Variable=',current_literal^.variable:1);|}
+  @<Unlink |current_literal|.@>@;
+  old_literal:=current_literal;
+  current_literal:=current_literal^.next_literal;
+  dispose(old_literal);
+  end;
+@<Unlink clause.@>@;
+old_clause:=current_clause;
+current_clause^.previous_clause^.next_clause:=current_clause^.next_clause;
+current_clause^.next_clause^.previous_clause:=current_clause^.previous_clause;
+dispose(old_clause);
+end;
+
+@ Unlink |current_literal|.
+
+@<Unlink |current_literal|.@>=
+current_literal^.next_occurrence^.previous_occurrence:=
+  current_literal^.previous_occurrence;
+current_literal^.previous_occurrence^.next_occurrence:=
+  current_literal^.next_occurrence;
+
+@ Unlink clause.
+
+@<Unlink clause.@>=
+current_clause^.next_clause^.previous_clause:=current_clause^.previous_clause;
+current_clause^.previous_clause^.next_clause:=current_clause^.next_clause;
+
+@ Do resolutions where at least one parent is subsumed. If a pair of clauses
+contain a single resolution literal (one that appears positively in one
+clause and negatively in the other clause) and the rest of the literals are
+common to both clauses, then the resolvant of the two clauses subsumes each
+parent clause.
+
+If a pair of clauses contain a single resolution literal (one that appears
+positively in one clause and negatively in the other clause) and the
+remainder of the literals from one clause are a subset of those from the
+other clause, then the resolvant subsumes the longer parent clause.
+
+This code looks for such cases. Each time it finds a case, it shortens a
+subsumed parent so that the parent is transformed into the resolvant. It
+removes the other parent in the case where both parents are subsumed.
+
+@<Do resolutions where at least one parent is subsumed.@>=
+{|writeln('At least one parent subsumed resolution.');|}
+for v:=1 to variables do
+  begin
+  {|writeln('variable=',v:1);|}
+  first_clause_literal:=literal_table[v,false].literal_head^.next_occurrence;
+  while first_clause_literal<>literal_table[v,false].literal_head do
+    begin
+    {|writeln('First clause=',first_clause_literal^.head^.clause_number:1);|}
+    second_clause_literal:=literal_table[v,true].literal_head^.next_occurrence;
+    while second_clause_literal<>literal_table[v,true].literal_head do
+      begin
+      {|writeln('Second clause=',
+        second_clause_literal^.head^.clause_number:1);|}
+      {|writeln('lengths:',first_clause_literal^.head^.clause_length,
+        second_clause_literal^.head^.clause_length);|}
+      if first_clause_literal^.head^.clause_length<=
+        second_clause_literal^.head^.clause_length then
+        @<First clause shorter or equal resolution.@>
+      else
+        @<Second clause shorter resolution.@>@;
+      end;
+    first_clause_literal:=first_clause_literal^.next_occurrence;
+    Resolved_b:
+    end;
+  end;
+
+@ First clause shorter or equal resolution.
+
+@<First clause shorter or equal resolution.@>=
+begin
+{|writeln('First clause shorter or equal.');|}
+if first_clause_literal^.head^.clause_length=
+  second_clause_literal^.head^.clause_length then
+  @<Equal length resolution.@>
+else
+  begin
+  @<First clause shorter resolution.@>@;
+  end;
+end
+
+@ Equal length resolution. If the resolution succeeds, then both parents are
+resolved. One is transformed into the resolvant and the other removed from
+the predicate.
+
+@<Equal length resolution.@>=
+begin
+{|writeln('Same length');|}
+a_literal:=first_clause_literal^.head^.literals;
+b_literal:=second_clause_literal^.head^.literals;
+while a_literal<>nil do
+  begin
+  if a_literal^.variable<>b_literal^.variable then
+    goto Resolution_not_same;
+  if a_literal^.positive<>b_literal^.positive then
+    if a_literal<>first_clause_literal then
+      goto Resolution_not_same;
+        {No need to test |b_literal| because each variable occurs at most
+	once.}
+  a_literal:=a_literal^.next_literal;
+  b_literal:=b_literal^.next_literal;
+  end;
+{|writeln('double subsumption resolution.');|}
+{|write(first_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(first_clause_literal^.head^.literals);|}
+{|write(second_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(second_clause_literal^.head^.literals);|}
+old_literal:=first_clause_literal;
+first_clause_literal:=first_clause_literal^.next_occurrence;
+Remove_literal(old_literal^.head^.literals,old_literal);
+old_clause:=second_clause_literal^.head;
+Remove_clause(old_clause);
+simplification:=true;
+goto Resolved_b;
+Resolution_not_same:
+second_clause_literal:=second_clause_literal^.next_occurrence;
+end
+
+@ Procedure Remove literal. For the clause pointed to by |list| remove the
+literal pointed to by |literal|. It is an error for the literal not to be on
+the list.
+
+@<Procedure Remove literal.@>=
+procedure Remove_literal(var list: literal_pointer;
+  current_literal: literal_pointer);
+begin
+if list=nil then
+  begin
+  writeln('Error: literal not on list.');
+  goto Grand_exit;
+  end;
+if list=current_literal then
+  begin
+  {|writeln('Remove variable ',current_literal^.variable:1,' from clause ',
+    current_literal^.head^.clause_number:1);|}
+  list:=list^.next_literal;
+  current_literal^.head^.clause_length:=current_literal^.head^.clause_length-1;
+  @<Unlink |current_literal|.@>@;
+  dispose(current_literal);
+  end
+else
+  Remove_literal(list^.next_literal,current_literal);
+end;
+
+@ First clause shorter resolution. If the resolution succeeds, then the
+second clause is tranformed into the resolvant.
+
+@<First clause shorter resolution.@>=
+begin
+{|writeln('First clause shorter');|}
+a_literal:=first_clause_literal^.head^.literals;
+b_literal:=second_clause_literal^.head^.literals;
+while a_literal<>nil do
+  begin
+  while b_literal<>nil do
+    begin
+    if b_literal^.variable>=a_literal^.variable then
+      begin
+      if b_literal^.variable>a_literal^.variable then goto Not_resolved_a;
+      if a_literal^.positive<>b_literal^.positive then
+        if a_literal<>first_clause_literal then
+          goto Not_resolved_a;
+      goto Resolution_equal_a;
+      end;
+    b_literal:=b_literal^.next_literal;
+    end;
+  goto Not_resolved_a;
+  Resolution_equal_a:
+  a_literal:=a_literal^.next_literal;
+  b_literal:=b_literal^.next_literal;
+  end;
+{|writeln('First clause resolves with second, resolvant subsumes second:');|}
+{|write(first_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(first_clause_literal^.head^.literals);|}
+{|write(second_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(second_clause_literal^.head^.literals);|}
+old_literal:=second_clause_literal;
+second_clause_literal:=second_clause_literal^.next_occurrence;
+Remove_literal(old_literal^.head^.literals,old_literal);
+simplification:=true;
+Not_resolved_a:
+second_clause_literal:=second_clause_literal^.next_occurrence;
+Resolved_a:
+end;
+
+@ Second clause shorter resolution.
+
+@<Second clause shorter resolution.@>=
+begin
+{|writeln('Second clause shorter');|}
+a_literal:=second_clause_literal^.head^.literals;
+b_literal:=first_clause_literal^.head^.literals;
+while a_literal<>nil do
+  begin
+  while b_literal<>nil do
+    begin
+    if b_literal^.variable>=a_literal^.variable then
+      begin
+      if b_literal^.variable>a_literal^.variable then goto Not_resolved_b;
+      if a_literal^.positive<>b_literal^.positive then
+        if a_literal<>second_clause_literal then
+          goto Not_resolved_b;
+      goto Resolution_equal_b;
+      end;
+    b_literal:=b_literal^.next_literal;
+    end;
+  goto Not_resolved_b;
+  Resolution_equal_b:
+  a_literal:=a_literal^.next_literal;
+  b_literal:=b_literal^.next_literal;
+  end;
+{|writeln('Second clause resolves with first, resolvant subsumes first:');|}
+{|write(first_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(first_clause_literal^.head^.literals);|}
+{|write(second_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(second_clause_literal^.head^.literals);|}
+old_literal:=first_clause_literal;
+first_clause_literal:=first_clause_literal^.next_occurrence;
+Remove_literal(old_literal^.head^.literals,old_literal);
+simplification:=true;
+goto Resolved_b;
+Not_resolved_b:
+second_clause_literal:=second_clause_literal^.next_occurrence;
+end;
+
+@ Process literals that are equal. This code looks for pairs of length two
+clauses which imply that two literals have the same (or opposite) values.
+
+@<Process literals that are equal.@>=
+{|writeln('Equals case.');|}
+for v:=1 to variables do
+  begin
+  {|writeln('variable=',v:1);|}
+  first_clause_literal:=literal_table[v,false].literal_head^.next_occurrence;
+  while first_clause_literal<>literal_table[v,false].literal_head do
+    begin
+    {|writeln('First clause=',
+      first_clause_literal^.head^.clause_number:1);|}
+    if first_clause_literal^.head^.literals=first_clause_literal then
+      if first_clause_literal^.head^.clause_length=2 then
+        @<Find second length 2 clause starting with opposite literal.@>@;
+    Equal_exit:
+    first_clause_literal:=first_clause_literal^.next_occurrence;
+    end;
+  end;
+
+@ Find second length 2 clause starting with opposite literal.
+
+@<Find second length 2 clause starting with opposite literal.@>=
+begin
+{|writeln('Length 2, first clause=',
+  first_clause_literal^.head^.clause_number:1);|}
+second_clause_literal:=literal_table[v,true].literal_head^.next_occurrence;
+while second_clause_literal<>literal_table[v,true].literal_head do
+  begin
+  {|writeln('Second clause=',
+    second_clause_literal^.head^.clause_number:1);|}
+  if second_clause_literal^.head^.literals=second_clause_literal then
+    if second_clause_literal^.head^.clause_length=2 then
+      @<Check second literals of pair for opposite.@>@;
+  second_clause_literal:=second_clause_literal^.next_occurrence;
+  end;
+end;
+
+@ Check second literals of pair for opposite.
+
+@<Check second literals of pair for opposite.@>=
+begin
+{|writeln('Length 2, second clause=',
+  second_clause_literal^.head^.clause_number:1);|}
+if first_clause_literal^.next_literal=nil then
+  begin
+  {|writeln('Error, first literal of two clause was also last!');|}
+  goto Grand_exit;
+  end;
+if second_clause_literal^.next_literal=nil then
+  begin
+  {|writeln('Error, first literal of two clause was also last (2)!');|}
+  goto Grand_exit;
+  end;
+if first_clause_literal^.next_literal^.variable=
+  second_clause_literal^.next_literal^.variable then
+  if first_clause_literal^.next_literal^.positive<>
+    second_clause_literal^.next_literal^.positive then
+    @<Fix value of second variable.@>@;
+end;
+
+@ Fix value of second variable. We have found a pair of length two clauses
+which imply that the value of the second variable is a function of the value
+of the first variable.
+
+@<Fix value of second variable.@>=
+begin
+for p:=false to true do
+  begin
+  current_literal:=
+   literal_table[first_clause_literal^.next_literal^.variable,p].literal_head^.
+     next_occurrence;
+  while current_literal<>
+    literal_table[first_clause_literal^.next_literal^.variable,p].literal_head
+    do
+    begin
+    if current_literal<>first_clause_literal^.next_literal then
+      if current_literal<>second_clause_literal^.next_literal then
+        @<Replace variable.@>@;
+    current_literal:=current_literal^.next_occurrence;
+    end;
+  end;
+goto Equal_exit;
+end;
+
+@ Replace variable.
+
+The literal pointed to by |current_literal| (old literal) in its clause
+should have its variable changed to that of the literal pointed to by
+|first_clause_literal| and have its parity adjusted appropriately because of
+an equation linking the values of the two literals.
+
+We skip all cases where the clause has a variable matching old literal and a
+variable matching new literal because such clauses will change or go away as
+we do more resolution.
+
+This leaves three cases where work is needed:
+
+\item{1.}The old literal was first on its list. In this case, we need to
+unlink the cell from the us
+
+@<Replace variable.@>=
+begin
+{|writeln('Replace variable');|}
+{|write(first_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(first_clause_literal^.head^.literals);|}
+{|write(second_clause_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(second_clause_literal^.head^.literals);|}
+{|write(current_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(current_literal^.head^.literals);|}
+{|writeln('First variable=',first_clause_literal^.variable:1);|}
+{|writeln('Second variable=',first_clause_literal^.next_literal^.variable:1);|}
+{|writeln('Changed variable=',current_literal^.variable:1);|}
+if current_literal^.head^.literals^.variable<
+  first_clause_literal^.next_literal^.variable then
+  begin
+  if current_literal^.head^.literals^.variable<
+    first_clause_literal^.variable then
+    @<Find place for new literal.@>
+  else
+    if current_literal^.head^.literals^.variable=
+      first_clause_literal^.variable then
+      @<Skip case.@>
+    else
+      @<New literal first.@>
+  end
+else
+  begin
+  if current_literal^.head^.literals^.variable=
+    first_clause_literal^.next_literal^.variable then
+    @<Old literal first.@>
+  else
+    @<Equal error.@>@;
+  end;
+simplification:=true;
+end;
+
+@ New literal first.
+
+The new literal needs to be first in the clause. The old
+literal is not first in the clause. Unlink the old literal, move it to the
+front of the clause, convert it, and relink it.
+
+@<New literal first.@>=
+begin
+{|writeln('New first literal.');|}
+b_literal:=current_literal^.head^.literals;
+while b_literal^.next_literal<>current_literal do
+  begin
+  b_literal:=b_literal^.next_literal;
+  end;
+temp_literal:=current_literal^.previous_occurrence;
+@<Unlink |current_literal|.@>@;
+b_literal^.next_literal:=current_literal^.next_literal;
+current_literal^.variable:=first_clause_literal^.variable;
+current_literal^.next_literal:=current_literal^.head^.literals;
+current_literal^.variable:=first_clause_literal^.variable;
+if first_clause_literal^.positive=
+  first_clause_literal^.next_literal^.positive then
+    current_literal^.positive:=not current_literal^.positive;
+current_literal^.head^.literals:=current_literal;
+@<Link literal by usage.@>@;
+{|writeln('Changed clause.');|}
+{|write(current_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(current_literal^.head^.literals);|}
+current_literal:=temp_literal;
+end
+
+@ Find place for new literal. The new literal does not belone at the front of
+the list. Find where it goes, move the cell for the old literal to that spot,
+and fix up the links.
+
+@<Find place for new literal.@>=
+begin
+a_literal:=current_literal^.head^.literals;
+while a_literal^.next_literal^.variable<first_clause_literal^.variable do
+  begin
+  a_literal:=a_literal^.next_literal;
+  end;
+if a_literal^.next_literal^.variable=first_clause_literal^.variable
+  then
+  @<Skip case.@>
+else
+  @<Move cell for old variable to current place.@>@;
+end
+
+@ Skip case. This case will go away when more resolutions are done, so skip
+it.
+
+@<Skip case.@>=
+begin
+end
+
+@ Move cell for old variable to current place. Now, |a_literal| is pointing
+to the cell just before where the cell for the new variable belongs. If the
+cell just after |a_literal| is the cell for old variable, then change it into
+a cell for new variable. Otherwise move the cell. In either case do the
+appropriate relinking.
+
+@<Move cell for old variable to current place.@>=
+begin
+b_literal:=a_literal;
+while b_literal^.next_literal<>current_literal do
+  b_literal:=b_literal^.next_literal;
+if b_literal^.next_literal^.variable<>
+  first_clause_literal^.next_literal^.variable then
+  begin
+  writeln('Error, did not hit literal to be changed.');
+  goto Grand_exit;
+  end;
+temp_literal:=current_literal^.previous_occurrence;
+@<Unlink |current_literal|.@>@;
+if b_literal<>a_literal then
+  @<Move cell.@>@;
+current_literal^.variable:=first_clause_literal^.variable;
+if first_clause_literal^.positive=
+  first_clause_literal^.next_literal^.positive then
+    current_literal^.positive:=not current_literal^.positive;
+@<Link literal by usage.@>@;
+{|writeln('Changed clause.');|}
+{|write(current_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(current_literal^.head^.literals);|}
+current_literal:=temp_literal;
+end
+
+@ Move cell.
+
+@<Move cell.@>=
+begin
+{|writeln('Move cell.');|}
+b_literal^.next_literal:=current_literal^.next_literal;
+{|Print_literal_list(current_literal^.head^.literals);|}
+current_literal^.next_literal:=a_literal^.next_literal;
+{|Print_literal_list(current_literal);|}
+a_literal^.next_literal:=current_literal;
+{|Print_literal_list(current_literal^.head^.literals);|}
+end;
+
+@ Old literal first.
+
+The old literal had been first in the clause. Since the
+new literal has an even smaller variable number it will also be first in the
+clause. Unlink the cell for the old literal on the usage lists, change the
+variable of the cell to be the variable, adjust the parity, and link the cell
+it into appropriate usage list.
+
+@<Old literal first.@>=
+begin
+temp_literal:=current_literal^.previous_occurrence;
+@<Unlink |current_literal|.@>@;
+current_literal^.variable:=first_clause_literal^.variable;
+if first_clause_literal^.positive=
+  first_clause_literal^.next_literal^.positive then
+    current_literal^.positive:=not current_literal^.positive;
+@<Link literal by usage.@>@;
+{|writeln('Changed clause.');|}
+{|write(current_literal^.head^.clause_number:1,':');|}
+{|Print_literal_list(current_literal^.head^.literals);|}
+current_literal:=temp_literal;
+end
+
+@ Equal error.
+
+@<Equal error.@>=
+begin
+{|writeln('Equal problem.');|}
+goto Grand_exit;
+end;
+
+@ Add unit clauses for pure literals. If a literal is pure and if it has any
+clauses other than a unit clause, add a unit clause for it. Omit variables
+that are not used at all.
+
+@<Add unit clauses for pure literals.@>=
+{|writeln('Pure literal.');|}
+for v:=1 to variables do
+  begin
+  {|writeln('variable=',v:1);|}
+  for p:=false to true do
+    begin
+    {|writeln('parity=',p);|}
+    if literal_table[v,p].literal_head^.next_occurrence=
+      literal_table[v,p].literal_head then
+      if literal_table[v,not p].literal_head^.next_occurrence<>
+        literal_table[v,not p].literal_head then
+        if literal_table[v,not p].literal_head^.next_occurrence^.head^.
+          clause_length>1 then
+          @<Pure literal found.@>@;
+    end;
+  end;
+
+@ Pure literal found. Variable |v| does not occur with parity |p|, so it is
+  pure.
+
+@<Pure literal found.@>=
+begin
+{|writeln('Pure literal found. v=',v:1,', p=',p);|}
+@<Make cell for clause.@>@;
+new(current_literal);
+current_literal^.variable:=v;
+current_literal^.positive:=not p;
+current_literal^.next_literal:=nil;
+@<Link literal by usage.@>@;
+new_clause^.literals:=current_literal;
+new_clause^.clause_length:=1;
+current_literal^.head:=new_clause;
+simplification:=true;
+end;
+
+@* Debugging and printing routines.
+
+@ Procedure Print predicate.
+
+@<Procedure Print predicate.@>=
+procedure Print_predicate;
+var
+current_clause: clause_pointer; {Pointer to current clause.}
+begin
+current_clause:=predicate_head^.next_clause;
+while current_clause<>predicate_head do
+  begin
+  write('Clause number ',current_clause^.clause_number:1,': ');
+  {|write('[',current_clause^.clause_length:1,']');|}
+  {|write('(',current_clause:1,')');|}
+  Print_literal_list(current_clause^.literals);
+  {|write('Stack list ');|}
+  current_clause:=current_clause^.next_clause;
+  {|writeln(' 0');|}
+  end;
+end;
+
+@ Procedure Print DIMACS.
+
+@<Procedure Print DIMACS.@>=
+procedure Print_DIMACS;
+var
+current_clause: clause_pointer; {Pointer to current clause.}
+clause_count: integer;
+begin
+current_clause:=predicate_head^.next_clause;
+clause_count:=0;
+while current_clause<>predicate_head do
+  begin
+  clause_count:=clause_count+1;
+  current_clause:=current_clause^.next_clause;
+  end;
+writeln(data_out,'p cnf ',variables:1,' ',clause_count:1);
+writeln('p cnf ',variables:1,' ',clause_count:1);
+current_clause:=predicate_head^.next_clause;
+while current_clause<>predicate_head do
+  begin
+  {|write('[',current_clause^.clause_length:1,']');|}
+  {|write('(',current_clause:1,')');|}
+  {|writeln('c clause number = ',current_clause^.clause_number:1);|}
+  Print_DIMACS_list(current_clause^.literals);
+  {|write('Stack list ');|}
+  current_clause:=current_clause^.next_clause;
+  end;
+end;
+
+@ Procedure Print DIMACS list.
+
+@<Procedure Print DIMACS list.@>=
+procedure Print_DIMACS_list(current_literal: literal_pointer);
+begin
+while current_literal<>nil do
+  begin
+  {|writeln;|}
+  if current_literal^.positive then
+    begin
+    write(data_out,new_name[current_literal^.variable]:1,' ');
+    write(new_name[current_literal^.variable]:1,' ');
+    end
+  else
+    begin
+    write(data_out,-new_name[current_literal^.variable]:1,' ');
+    write(-new_name[current_literal^.variable]:1,' ');
+    end;
+  current_literal:=current_literal^.next_literal;
+  end;
+writeln(data_out,' 0');
+writeln(' 0');
+end;
+
+@ Procedure Print literal list.
+
+@<Procedure Print literal list.@>=
+procedure Print_literal_list(current_literal: literal_pointer);
+begin
+while current_literal<>nil do
+  begin
+  {|writeln;|}
+  if current_literal^.positive then
+    write(current_literal^.variable:5)
+  else
+    write(-current_literal^.variable:5);
+  @<Print all literal fields.@>@;
+  current_literal:=current_literal^.next_literal;
+  end;
+writeln;
+end;
+
+@ Print all literal fields.
+
+@<Print all literal fields.@>=
+{|write('(',current_literal:1,')');|}
+{|write('next occurrence ',current_literal^.next_occurrence:1);|}
+{|write(' previous occurrence ',current_literal^.previous_occurrence:1);|}
+
+@ Variables.
+
+@<Variables.@>=
+i: integer;
+j: integer;
+current_clause: clause_pointer;
+clause_literal: literal_pointer;
+
+@* Unit clauses.
+
+@ SAT. This is just unit clause part of SAT.
+
+@<SAT.@>=
+current_clause:=predicate_head^.next_clause;
+if current_clause=predicate_head then
+  begin
+  {|writeln('No clauses, so predicate is trivially satisfiable.');|}
+  goto Problem_exit;
+  end
+else
+  begin
+  while current_clause<>predicate_head do
+    begin
+    if current_clause^.clause_length=0 then
+      begin
+      {|writeln('Empty clause, so predicate is trivially unsatisfiable.');|}
+      goto Problem_exit;
+      end;
+    current_clause:=current_clause^.next_clause;
+    end;
+  @<Nontrivial SAT.@>@;
+  end;
+
+@ Nontrivial SAT.
+
+@<Nontrivial SAT.@>=
+@<Count usage of literals.@>@;
+@<If unit-clause variable, remove it.@>@;
+@<Remove tracking variables.@>@;
+
+@ Count usage of literals.
+
+@<Count usage of literals.@>=
+for v:=1 to variables do
+  begin
+  for p:=false to true do
+    begin
+    for j:=1 to max_length do literal_table[v,p].count[j]:=0;
+    clause_literal:=literal_table[v,p].literal_head^.next_occurrence;
+    while clause_literal<>literal_table[v,p].literal_head do
+      begin
+      literal_table[v,p].count[clause_literal^.head^.clause_length]:=
+        literal_table[v,p].count[clause_literal^.head^.clause_length]+1;
+      clause_literal:=clause_literal^.next_occurrence;
+      end;
+    end;
+  end;
+
+@ If unit-clause variable, remove it.
+
+@<If unit-clause variable, remove it.@>=
+for v:=1 to variables do
+  for p:=false to true do
+    @<Check unit clause.@>@;
+
+@ Check unit clause.
+
+@<Check unit clause.@>=
+begin
+if (literal_table[v,p].count[1]>0) then
+  begin
+  if literal_table[v,not p].count[1]>0 then
+    begin
+    writeln('variable ',v:1,' has conflicting unit clauses.');
+    writeln('This suggests a program error.');
+    goto Problem_exit;
+    end;
+  for i:=2 to max_length do
+    if (literal_table[v,p].count[i]>0) or (literal_table[v,not p].count[i]>0)
+    then 
+      begin
+      writeln('variable ',v:1,' has a unit clause and some non unit clauses.');
+      writeln('This suggests a program error.');
+      goto Problem_exit;
+      end;
+  {|writeln('Remove variable ',v:1,'. It is ',p);|}
+  Remove_clause(literal_table[v,p].literal_head^.next_occurrence^.head);
+  end;
+end;
+
+@ Remove tracking variables. If a variable is equal to another variable or if
+it is opposite another variable, then remove it.
+
+@<Remove tracking variables.@>=
+for v:=1 to variables do
+  begin
+  if (literal_table[v,false].count[2]=1) and
+    (literal_table[v,true].count[2]=1) then
+    begin
+     if (literal_table[v,false].count[1]>0) or
+       (literal_table[v,true].count[1]>0) then
+       begin
+       writeln('Program error, we still have unit clauses.');{||}
+       goto Problem_exit;
+       end;
+    for i:=3 to max_length do
+      begin
+      if (literal_table[v,false].count[i]>0) or
+        (literal_table[v,true].count[i]>0) then
+        goto Not_tracking;
+      end;
+    if literal_table[v,false].literal_head^.next_occurrence^.head^.literals^.
+      variable<>v then
+      if literal_table[v,false].literal_head^.next_occurrence^.head^.literals^.
+        variable=
+      literal_table[v,true].literal_head^.next_occurrence^.head^.literals^.
+        variable
+      then
+        begin
+        if literal_table[v,false].literal_head^.next_occurrence^.head^.
+          literals^.positive=
+          literal_table[v,true].literal_head^.next_occurrence^.head^.literals^.
+          positive then
+          begin
+          writeln('v=',v:1,'. clause should have been removed by resolution.');
+          goto Problem_exit;
+          end;    
+        {|if literal_table[v,false].literal_head^.next_occurrence^.head^.
+          literals^.positive then
+          writeln('Variable ',v:1,' removed value same as ',
+            literal_table[v,false].literal_head^.next_occurrence^.head^.
+            literals^.variable:1)
+        else
+          writeln('Variable ',v:1,' removed value opposite ',
+            literal_table[v,false].literal_head^.next_occurrence^.head^.
+            literals^.variable:1);|}
+        Remove_clause(
+          literal_table[v,false].literal_head^.next_occurrence^.head);
+        Remove_clause(
+          literal_table[v,true].literal_head^.next_occurrence^.head);
+        end;
+    Not_tracking:
+    end;
+  end;
+
+@* Renaming variables.
+
+Variables.
+
+@<Variables.@>=
+new_name: array[1..max_variables] of 0..max_variables;
+
+@ Renaming initialization.
+
+@<Renaming initialization.@>=
+for v:=1 to variables do
+  new_name[v]:=v;
+
+@ Renaming variables.
+
+@<Renaming variables.@>=
+@<Count usage of literals.@>@;
+i:=0;
+for v:=1 to variables do
+  begin
+  for p:=false to true do
+    for j:=1 to max_length do
+      if literal_table[v,p].count[j]>1 then goto Variable_used;
+  new_name[v]:=0;
+  goto Variable_not_used;
+  Variable_used:
+  i:=i+1;
+  new_name[v]:=i;
+  {|writeln('Variable ',v:1,' renamed ',i:1);|}
+  Variable_not_used:
+  end;
+variables:=i;
+
+@* Index.
