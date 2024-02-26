@@ -1,0 +1,249 @@
+<html> 
+ <head> 
+ <TITLE>CNF Generator for Factoring Problems</TITLE> 
+ <link rev="made" href="mailto:sabry@cs.indiana.edu"> 
+ </head> 
+
+<body> 
+  
+<!------------------------------------------------------------------------> 
+<h1>CNF Generator for Factoring Problems</h1> 
+<h2>by <a href="http://www.cs.indiana.edu/~pwp">Paul Purdom</a> and 
+       <a href="http://www.cs.indiana.edu/~sabry">Amr Sabry</a></h2>
+  
+<h3>News</h3>
+
+<ul>
+<p><li>5 Jul 2014: Fixed a bug for inputs less than 5.
+
+<p><li>23 Nov 2007: Fixed a bug that caused the generator to occasionally
+output clauses with boolean constants instead of variables. 
+
+<p><li>1 Jan 2006: The old CGI servers has been replaced by a new one running a
+different OS. The code for the simplification has not been recompiled for the
+new system yet and hence the simplification of the output does not work now.
+
+<p><li> 10 Feb 2005: Fixed a bug in the simplifier that caused it to sometimes
+drop some clauses.
+</ul>
+
+
+<h3>Web interface</h3>
+This program generates a Conjunctive Normal Form (CNF) predicate
+associated with the integer and the circuit that you specify. The
+predicate will be satisfiable if the integer is composite and it will
+be unsatisfiable if the integer is prime. The predicate is in the <a
+href="http://www.satlib.org/Benchmarks/SAT/satformat.ps">DIMACS
+format</a> used in <a
+href="http://www.satlive.org/SATCompetition/index.jsp">SAT
+competitions</a>.
+
+<p>
+<hr>
+<FORM ACTION="cnf.cgi" METHOD=GET>
+<table>
+<tr>
+<b>
+</b>
+</tr>
+<tr>
+  <td>Number to factor: 
+  <td><INPUT TYPE="text" NAME="factor" SIZE=20>
+</tr>
+<tr>
+  <td>Adder type: 
+  <td><INPUT TYPE="radio" NAME="Adder" VALUE="nbit" CHECKED="True"> N-Bit 
+      &nbsp;&nbsp;&nbsp;&nbsp;<INPUT TYPE="radio" NAME="Adder" VALUE="fast"> Fast
+</tr>
+<tr>
+  <td>Multiplier type: 
+  <td><INPUT TYPE="radio" NAME="Multiplier" VALUE="carrysave" CHECKED="True"> Carry-save 
+      &nbsp;&nbsp;&nbsp;&nbsp;<INPUT TYPE="radio" NAME="Multiplier" VALUE="wallace"> Wallace 
+      &nbsp;&nbsp;&nbsp;&nbsp;<INPUT TYPE="radio" NAME="Multiplier" VALUE="recursive"> Recursive
+</tr>
+<!--
+<tr>
+  <td>Simplify output: 
+  <td><INPUT TYPE="radio" NAME="Simplify" VALUE="no" CHECKED="True"> No
+      &nbsp;&nbsp;&nbsp;&nbsp;<INPUT TYPE="radio" NAME="Simplify" VALUE="yes"> Yes
+</tr>
+-->
+</table>
+<BR><INPUT TYPE="submit" VALUE="Submit"> <INPUT TYPE="reset" NAME="Reset">
+</FORM>
+
+<hr>
+
+<h3>Documentation</h3>
+
+<p><blockquote>
+For those who want more information, the full source code for the
+predicate generation is collected in <a href="cnf1.hs">this Haskell
+file</a>. The source code for the simplifier is in <a
+href="sat.web">this WEB file</a>.
+</blockquote></p>
+
+<p>The program produces one or two web pages as output depending on
+whether you select <i>Simplify output</i> or not. 
+
+<p> The web page for the output predicate begins with a lot of
+comments. If you are interested, you can use these comments to
+determine the meaning of each variable in the predicate, and you can
+discard them if you are not interested. Some of the variables give the
+bits of the product. Those variables will appear in unit clauses that
+force them to take on the appropriate value so that they represent the
+number you input. Some of the variables give the bits of the first
+factor. Some of the variables give the bits of the second factor. The
+remaining variables give the values on the wires in the multiplication
+circuit that is simulated by the predicate. All of the details should
+be clear from reading the comments. Likewise the details of how the
+circuit is wired together should be clear.
+
+<p> To ensure that no factors are found for prime numbers, the circuit
+requires, for <b><code>n</code></b>-bit inputs, that the first factor
+have no more than <b><code>(n-1)</code></b> bits and that the second
+factor has no more than <b><code>n/2</code></b> (rounded up) bits.
+
+<p> The two basic types of multiplication circuits that are
+implemented are:
+<ol>
+<li>the carry-save multiplier, and <li>the <a
+href="http://www.csse.monash.edu.au/cgi-bin/person_info?csw">Wallace</a>-tree
+multiplier (IEEE Trans. on Electronic Comp., 1964).
+</ol>
+If you select <i>recursive</i>, then the circuit is built based on the
+algorithm of Karatsuba (as taken from <a
+href="http://www.oup-usa.org/toc/tc_0030720443.html">The Analysis of
+Algorithms</a> by <a href="http://www.cs.indiana.edu/~pwp">Purdom</a>
+and <a href="http://www.cs.pdx.edu/~cbrown/">Brown</a>). When the
+number of bits in each input becomes less than 20 bits, the recursive
+multiplier reverts to the Wallace tree multiplier. (The recursive
+option is only recommended for very large problems.) 
+
+<p> For the two basic types of multipliers, the circuit begins by
+forming all the products <b>a<sub>i</sub> * b<sub>j</sub></b> where
+<b>a<sub>i</sub></b> is a digit from the first number factor and
+<b>b<sub>j</sub></b> is a digit from the second factor. These products
+are then added, but each multiplier circuit differs in the details of
+how they carry out the addition.
+
+<p> In the carry-save circuit, row <b><code>i</code></b> of the
+circuit adds the product from row <b><code>i</code></b>
+<b>(a<sub>i</sub> * b<sub>*</sub>)</b> with the sum and carry (shifted
+one column) to obtain a new sum and a new carry. A special adder is
+used to add the final sum and final carry.  The products from the
+first row must go through a linear number of adders to get to the
+special adder.
+
+<p> In the Wallace-tree circuit, the rows (with appropriate shifts)
+are added in groups of three to produce sums and carries. The sums and
+carries (with appropriate shifts) are again added in groups of three,
+and this is repeated until there is just one sum and one carry. Then a
+special adder is used to add the final sum and the final carry. The
+products from any row need go through only a logarithmic number of
+adders before they get to the special adder.
+
+<p> The adder type specifies the special adder. The
+<b><code>n</code></b>-bit adder uses the algorithm (adapted to binary
+numbers) taught in grade school. It is simple, but carries must
+propagate through a linear number of addition stages.
+
+<p> The fast adder is a <b><code>log</code></b>-time adder taken from
+<a
+href="http://www.whfreeman.com/college/book.asp?id_product=1002000383">Foundations
+of Computer Science</a> by <a
+href="http://www1.cs.columbia.edu/~aho/">Aho</a> and <a
+href="http://www-db.stanford.edu/~ullman/">Ullman</a>. If you select
+<i>Fast</i> for adder type and <i>Wallace</i> for multiplier type,
+then no path in the circuit has length longer than a small constant
+times the number of bits needed to specify the input integer. It is an
+interesting experimental question as to whether such SAT problems are
+easier.
+
+<p>The predicate generation is written using a <a
+href="http://www.haskell.org">Haskell</a> program (inspired by the <a
+href="http://www.math.chalmers.se/~koen/Lava/papers.html">Lava
+library</a>). The idea is that one writes completely standard
+executable specifications for the circuits, and then exploits Haskell
+type classes to get a non-standard interpretation of the primitives
+which generates CNF clauses. For example, a half-adder is specified as follows:
+<pre>
+halfAdd :: Circuit m => (Bit,Bit) -> m (Bit,Bit)
+halfAdd (a,b) = 
+  do carryOut <- and2 (a,b)
+     sum <- xor2 (a,b)
+     return (carryOut,sum)
+</pre>
+In the standard interpretation, <code>and2</code> is defined as the
+usual operation on booleans:
+<pre>
+  and2 (Bool x, Bool y) = return (Bool (x && y))
+</pre>
+In the symbolic interpretation, <code>and2</code> instead generates
+CNF clauses relating its input variables to its output variables:
+<pre>
+  and2 (b1, b2) = 
+    do v <- newBitVar
+       let or1 = Or [b1, b2, notBit v]
+           or2 = Or [b1, notBit b2, notBit v]
+           or3 = Or [notBit b1, b2, notBit v]
+           or4 = Or [notBit b1, notBit b2, v]
+       addDesc [or1,or2,or3,or4]
+       return v
+</pre>
+This approach to generating the predicates is appealing as it enables
+us to use the full power of Haskell to write circuits naturally, test
+the circuits extensively using the standard interpretation, and then
+simply turn a switch on to use the symbolic interpretation. 
+
+<p> The initial output has many trivial features, including unit
+clauses. The simplifier applies rules to simplify the predicate
+without changing the set of solutions. The simplifier has fixed size
+limits, so it may not work for large problems. (It can handle a
+maximum of 15,000 variables and 63,000 clauses.)
+
+<p> The simplifier repeatedly applies the following rules to the
+CNF predicate:
+<ol>
+<li>Remove subsumed clauses. (If the literals in clause A are a subset
+of those in clause B, then remove clause B.)  
+
+<li> Do resolutions where at least one parent is subsumed. (If clause
+A is <b>x l<sub>1</sub> ... l<sub>n</sub></b> and clause B is <b>-x
+l<sub>1</sub> ... l<sub>n</sub> y<sub>1</sub> ... y<sub>n</sub></b>
+then replace clause B with <b>l<sub>1</sub> ... l<sub>n</sub>
+y<sub>1</sub> ... y<sub>n</sub></b>.  
+
+<li> Substitute for equalities. (If clause A is <b>l<sub>1</sub>
+-l<sub>2</sub></b> and clause B is <b>-l<sub>1</sub>
+l<sub>2</sub></b>, then replace all occurrences of
+<b>l<sub>2</sub></b> with <b>l<sub>1</sub></b> except in clauses A and
+B.)
+
+</ol>
+
+<h3>Applications</h3>
+<ul>
+<li><a href="http://www.sourceforge.net/projects/atpg">ATPG template
+class library</a> (Library for Combitional/Sequential logic
+simulation, and fault simulation functionality (semi-PROOFS)).
+</ul>
+
+<!-------------------------------->
+<hr>
+<script language="javascript">
+<!--
+document.write("Last modified: ")
+document.write(document.lastModified)
+//-->
+</script>
+
+<address>
+
+<a href="mailto:sabry@cs.indiana.edu">sabry@cs.indiana.edu</a>
+
+</address>
+
+</body>
+</html>
+
