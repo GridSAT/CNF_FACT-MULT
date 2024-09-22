@@ -56,13 +56,13 @@ This command compile `cnf1.hs` / `cnf2.hs` into executables named `cnf1` / `cnf2
 
 4. **Run** the executable with the required arguments:
 
-`/cnf1` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
+`./cnf1` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
 and/or  
-`/cnf2` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
+`./cnf2` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
 and/or  
-`/cnf3` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
+`./cnf3` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
 or  
-`/cnf3` # Batch mode, processes numbers from `input.txt` +++ requires `input.txt` in script directory with min. one digit +++
+`./cnf3` # Batch mode, processes numbers from `input.txt` +++ requires `input.txt` in script directory with min. one digit +++
 
 Replace placeholders as necessary:
 
@@ -70,7 +70,7 @@ Replace placeholders as necessary:
 `[adder_type]`: Choose between n-bit or fast.  
 `[multiplier_type]`: Options include carry-save, wallace, or recursive.  
 
-For `/cnf3` without CLI arguments, `n-bit` `carry-save` is default method and input.txt must be in script directory with one digit per line, e.g.:  
+For `./cnf3` without CLI arguments, `n-bit` `carry-save` is default method and input.txt must be in script directory with one digit per line, e.g.:  
 
 1  
 22  
