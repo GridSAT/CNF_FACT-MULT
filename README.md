@@ -47,9 +47,9 @@ This section provides instructions on how to compile and run `cnf1.hs` / `cnf2.h
 3. **Compile** the Haskell script using GHC:
 
 ```ghc cnf1.hs -o cnf1``` # Compiles `cnf1.hs` to the executable ```/cnf1```  
-and/or  
+  - and/or  
 ```ghc cnf2.hs -o cnf2``` # Compiles `cnf2.hs` to the executable ```/cnf2```  
-and/or  
+  - and/or  
 ```ghc cnf3.hs -o cnf3``` # Compiles `cnf3.hs` to the executable ```/cnf3``` +++ recommended +++  
 
 This command compile `cnf1.hs` / `cnf2.hs` into executables named `cnf1` / `cnf2` respectively.  
@@ -57,11 +57,11 @@ This command compile `cnf1.hs` / `cnf2.hs` into executables named `cnf1` / `cnf2
 4. **Run** the executable with the required arguments:
 
 `./cnf1` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
-and/or  
+  - and/or  
 `./cnf2` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
-and/or  
+  - and/or  
 `./cnf3` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
-or  
+  - or  
 `./cnf3` # Batch mode, processes numbers from `input.txt` +++ requires `input.txt` in script directory with min. one digit +++
 
 Replace placeholders as necessary:
@@ -72,9 +72,9 @@ Replace placeholders as necessary:
 
 For `./cnf3` without CLI arguments, `n-bit` `carry-save` is default method and input.txt must be in script directory with one digit per line, e.g.:  
 
-1  
-22  
-333  
+  - 1  
+  - 22  
+  - 333  
 
 ### Windows
 
@@ -83,19 +83,19 @@ For `./cnf3` without CLI arguments, `n-bit` `carry-save` is default method and i
 3. **Compile** the Haskell script using GHC:
 
 ```ghc cnf1.hs -o cnf1.exe``` # Compiles `cnf1.hs` to the executable `cnf1.exe`  
-and/or  
+  - and/or  
 ```ghc cnf2.hs -o cnf2.exe``` # Compiles `cnf2.hs` to the executable `cnf2.exe`  
-and/or  
+  - and/or  
 ```ghc cnf3.hs -o cnf3.exe``` # Compiles `cnf3.hs` to the executable `cnf3.exe` +++ recommended +++  
 
 4. **Run** the executable with the required arguments:
 
 `cnf1.exe` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
-and/or  
+  - and/or  
 `cnf2.exe` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
-and/or  
+  - and/or  
 `cnf3.exe` `[number]` `[n-bit|fast]` `[carry-save|wallace|recursive]` # Single number processing  
-or  
+  - or  
 `cnf3.exe` # Batch mode, processes numbers from `input.txt` +++ requires `input.txt` in script directory with min. one digit +++  
 
 Replace placeholders as necessary:
@@ -106,9 +106,9 @@ Replace placeholders as necessary:
 
 For `cnf3.exe` without CLI arguments, `n-bit` `carry-save` is default method and input.txt must be in script directory with one digit per line, e.g.:  
 
-1  
-22  
-333  
+  - 1  
+  - 22  
+  - 333  
 
 ### Note
 - For any missing Haskell packages or libraries, you may need to install them using `cabal install [package-name]` or `stack install [package-name]`.
@@ -129,15 +129,40 @@ The two basic types of multiplication circuits that are implemented are:
 
 If you select recursive, then the circuit is built based on the algorithm of Karatsuba (as taken from [The Analysis of Algorithms](https://github.com/GridSAT/CNF_FACT-MULT/blob/main/docs/The_Analysis_of_Algorithms.pdf) by [Paul Purdom](https://legacy.cs.indiana.edu/~pwp/) and [Cynthia A. Brown](https://dblp.org/pid/23/3171.html). When the number of bits in each input becomes less than 20 bits, the recursive multiplier reverts to the Wallace tree multiplier. (The recursive option is only recommended for very large problems.)
 
-For the two basic types of multipliers, the circuit begins by forming all the products **a<sub>i</sub> \* b<sub>j</sub>**  where **a<sub>i</sub>** is a digit from the first number factor and **b<sub>j</sub>** is a digit from the second factor. These products are then added, but each multiplier circuit differs in the details of how they carry out the addition.
+For the two basic types of multipliers, the circuit begins by forming all the products **a<sub>*i*</sub> \* b<sub>*j*</sub>**  where **a<sub>*i*</sub>** is a digit from the first number factor and **b<sub>*j*</sub>** is a digit from the second factor. These products are then added, but each multiplier circuit differs in the details of how they carry out the addition.
 
-In the carry-save circuit, row **`i`** of the circuit adds the product from row **`i`** **(a<sub>i</sub> \* b<sub>\*</sub>)** with the sum and carry (shifted one column) to obtain a new sum and a new carry. A
+In the carry-save circuit, row **`i`** of the circuit adds the product from row **`i`** **(a<sub>*i*</sub> \* b<sub>\*</sub>)** with the sum and carry (shifted one column) to obtain a new sum and a new carry. A
 
 In the Wallace-tree circuit, the rows (with appropriate shifts) are added in groups of three to produce sums and carries. The sums and carries (with appropriate shifts) are again added in groups of three, and this is repeated until there is just one sum and one carry. Then a special adder is used to add the final sum and the final carry. The products from any row need go through only a logarithmic number of adders before they get to the special adder.
 
 The adder type specifies the special adder. The **`n`**-bit adder uses the algorithm (adapted to binary numbers) taught in grade school. It is simple, but carries must propagate through a linear number of addition stages.
 
 The fast adder is a **`log`**-time adder taken from [Foundations of Computer Science](http://infolab.stanford.edu/~ullman/focs.html) by [Al Aho](http://www1.cs.columbia.edu/~aho/) and [Jeff Ullman](http://infolab.stanford.edu/~ullman/). If you select *Fast* for adder type and *Wallace* for multiplier type, then no path in the circuit has length longer than a small constant times the number of bits needed to specify the input integer. It is an interesting experimental question as to whether such SAT problems are easier.
+
+## Tseytin Transformation
+
+This CNF generator uses the [Tseytin Transformation](https://en.wikipedia.org/wiki/Tseytin_transformation) to efficiently convert arithmetic circuits into equisatisfiable CNF formulas.
+
+Instead of encoding the entire logical structure of the circuit directly into CNF [with know lower-bounds for `MULT`](https://www.researchgate.net/publication/3042737_On_the_complexity_of_VLSI_implementations_and_graph_representationsof_Boolean_functions_with_application_to_integer_multiplication), the Tseytin method introduces fresh variables for the outputs of each logic gate and relates them to their inputs through local CNF clauses. This ensures:  
+
+  - The CNF size grows linearly with the number of gates in the circuit.
+  - The CNF formula remains equisatisfiable with the original circuit (i.e., any satisfying assignment of the CNF corresponds to a valid circuit computation).
+
+For example, for an `AND gate` with inputs `a`, `b` and output `v`, Tseytin encoding generates the following four CNF clauses:
+
+```haskell
+(v ∨ ¬a ∨ ¬b)  
+(¬v ∨ a)  
+(¬v ∨ b)`  
+```
+
+This enforces the logical equivalence:
+
+```haskell
+v ↔ (a ∧ b)
+```
+
+Similar clauses are generated for other gates such as `OR`, `XOR`, `MUX`, etc.
 
 The predicate generation is written using a [Haskell](https://www.haskell.org) program (inspired by the [Lava library](https://dl.acm.org/doi/pdf/10.1145/289423.289440)). The idea is that one writes completely standard executable specifications for the circuits, and then exploits Haskell type classes to get a non-standard interpretation of the primitives which generates CNF clauses. For example, a half-adder is specified as follows:
 
@@ -149,7 +174,7 @@ halfAdd (a,b) =
 		return (carryOut,sum)
 ```
 
-In the standard interpretation, and2 is defined as the usual operation on booleans:
+In the standard interpretation, `and2` is defined as the usual operation on booleans:
 
 ```haskell
 	and2 (Bool x, Bool y) = return (Bool (x && y))
@@ -167,7 +192,8 @@ In the symbolic interpretation, `and2` instead generates CNF clauses relating it
 			addDesc [or1,or2,or3,or4]
 			return v
 ```
-
+     
+This process symbolically simulates the circuit while producing CNF clauses for each gate, following Tseytin’s method where even complex circuits with know lower-bounds can be converted into manageable CNF formulas suitable for SAT solvers, without a blow-up in formula size.  
 This approach to generating the predicates is appealing as it enables us to use the full power of Haskell to write circuits naturally, test the circuits extensively using the standard interpretation, and then simply turn a switch on to use the symbolic interpretation. The initial output has many trivial features, including unit clauses. The simplifier applies rules to simplify the predicate without changing the set of solutions. The simplifier has fixed size limits, so it may not work for large problems. (It can handle a maximum of 15,000 variables and 63,000 clauses.)
 
 The simplifier repeatedly applies the following rules to the CNF predicate:
@@ -179,8 +205,3 @@ The simplifier repeatedly applies the following rules to the CNF predicate:
 
 ## Applications
 - [ATPG template class library](https://sourceforge.net/projects/atpg/) (Library for Combinational/Sequential logic simulation, and fault simulation functionality (semi-PROOFS)).
-
-##
-**Last modified**: 03/13/2024 2:36:10 CET
-
-For more information, contact [sabry@cs.indiana.edu](mailto:sabry@cs.indiana.edu) or [GridSAT Stiftung](https://keybase.io/gridsat)
