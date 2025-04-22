@@ -127,11 +127,11 @@ The two basic types of multiplication circuits that are implemented are:
 - The carry-save multiplier
 - [A Suggestion for a Fast Multiplier (IEEE Trans. on Electronic Comp., 1964)](https://ieeexplore.ieee.org/document/4038071) with [the full paper here](https://github.com/GridSAT/CNF_FACT-MULT/blob/main/docs/a_suggestion_for_a_fast_multiplier.pdf).
 
-If you select recursive, then the circuit is built based on the algorithm of Karatsuba (as taken from [The Analysis of Algorithms](https://github.com/GridSAT/CNF_FACT-MULT/blob/main/docs/The_Analysis_of_Algorithms.pdf) by [Paul Purdom](https://legacy.cs.indiana.edu/~pwp/) and [Cynthia A. Brown](https://dblp.org/pid/23/3171.html). When the number of bits in each input becomes less than 20 bits, the recursive multiplier reverts to the Wallace tree multiplier. (The recursive option is only recommended for very large problems.)
+If you select *recursive*, then the circuit is built based on the algorithm of Karatsuba (as taken from [The Analysis of Algorithms](https://github.com/GridSAT/CNF_FACT-MULT/blob/main/docs/The_Analysis_of_Algorithms.pdf) by [Paul Purdom](https://legacy.cs.indiana.edu/~pwp/) and [Cynthia A. Brown](https://dblp.org/pid/23/3171.html). When the number of bits in each input becomes less than 20 bits, the recursive multiplier reverts to the Wallace tree multiplier. (The recursive option is only recommended for very large problems.)
 
 For the two basic types of multipliers, the circuit begins by forming all the products **a<sub>*i*</sub> \* b<sub>*j*</sub>**  where **a<sub>*i*</sub>** is a digit from the first number factor and **b<sub>*j*</sub>** is a digit from the second factor. These products are then added, but each multiplier circuit differs in the details of how they carry out the addition.
 
-In the carry-save circuit, row **`i`** of the circuit adds the product from row **`i`** **(a<sub>*i*</sub> \* b<sub>\*</sub>)** with the sum and carry (shifted one column) to obtain a new sum and a new carry. A
+In the carry-save circuit, row **`i`** of the circuit adds the product from row **`i`** **(a<sub>*i*</sub> \* b<sub>\*</sub>)** with the sum and carry (shifted one column) to obtain a new sum and a new carry.
 
 In the Wallace-tree circuit, the rows (with appropriate shifts) are added in groups of three to produce sums and carries. The sums and carries (with appropriate shifts) are again added in groups of three, and this is repeated until there is just one sum and one carry. Then a special adder is used to add the final sum and the final carry. The products from any row need go through only a logarithmic number of adders before they get to the special adder.
 
